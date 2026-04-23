@@ -5,12 +5,19 @@
   "start_node": "receive_alarm",
   "metadata": {
     "category": "devops",
-    "tags": ["aws", "lambda", "api-gateway", "cloudwatch", "validation", "post-deployment"]
+    "tags": [
+      "aws",
+      "lambda",
+      "api-gateway",
+      "cloudwatch",
+      "validation",
+      "post-deployment"
+    ]
   },
   "variables": {
     "agent_id": "REPLACE_WITH_AZIRON_AGENT_ID",
-    "api_gw_url": "https://REPLACE_WITH_API_GW_ID.execute-api.us-east-1.amazonaws.com",
-    "api_gw_id": "REPLACE_WITH_API_GW_ID",
+    "api_gw_url": "https://6qi1ysilmj.execute-api.us-east-1.amazonaws.com",
+    "api_gw_id": "6qi1ysilmj",
     "aws_region": "us-east-1",
     "aws_access_key_id": "REPLACE_WITH_AWS_ACCESS_KEY_ID",
     "aws_secret_access_key": "REPLACE_WITH_AWS_SECRET_ACCESS_KEY",
@@ -24,7 +31,11 @@
       "type": "webhook",
       "name": "Receive CloudWatch Alarm",
       "config": {},
-      "position": {"x": 48, "y": 0}
+      "position": {
+        "x": 48,
+        "y": 0
+      },
+      "enabled": true
     },
     {
       "id": "parse_alarm_event",
@@ -34,16 +45,29 @@
         "language": "javascript",
         "code": "// Extract alarm details from CloudWatch EventBridge payload\nconst event = context?.webhook_data || context?.input || {};\n\n// EventBridge CloudWatch Alarm State Change structure\nconst detail = event.detail || {};\nconst alarmName = detail.alarmName || event.alarmName || 'demo-5xx-ApiGw5xxAlarm';\nconst alarmState = (detail.state || {}).value || 'ALARM';\nconst alarmReason = (detail.state || {}).reason || '';\nconst previousState = (detail.previousState || {}).value || 'OK';\nconst alarmTime = (detail.state || {}).timestamp || new Date().toISOString();\nconst region = event.region || 'us-east-1';\n\n// Extract API GW ID from alarm configuration if available\nconst configuration = detail.configuration || {};\nconst metrics = configuration.metrics || [];\nlet apiGwId = '';\nfor (const m of metrics) {\n  const dims = (m.metricStat || {}).metric?.dimensions || {};\n  if (dims.ApiId) { apiGwId = dims.ApiId; break; }\n}\n\nreturn {\n  alarm_name: alarmName,\n  alarm_state: alarmState,\n  previous_state: previousState,\n  alarm_time: alarmTime,\n  alarm_reason: alarmReason,\n  region: region,\n  api_gw_id: apiGwId || context?.variables?.api_gw_id || '',\n  api_gw_url: context?.variables?.api_gw_url || '',\n  validation_start: new Date().toISOString()\n};"
       },
-      "position": {"x": 432, "y": 0}
+      "position": {
+        "x": 432,
+        "y": 0
+      },
+      "enabled": true
     },
     {
       "id": "notify_validation_started",
       "type": "notification",
       "name": "Notify Validation Started",
       "config": {
-        "message": "🔍 Post-deployment validation started\nAlarm: {{steps.parse_alarm_event.output.alarm_name}}\nState: {{steps.parse_alarm_event.output.alarm_state}}\nTime: {{steps.parse_alarm_event.output.alarm_time}}\nRunning: health checks → CloudWatch metrics → integration tests"
+        "message": "\ud83d\udd0d Post-deployment validation started\nAlarm: {{steps.parse_alarm_event.output.alarm_name}}\nState: {{steps.parse_alarm_event.output.alarm_state}}\nTime: {{steps.parse_alarm_event.output.alarm_time}}\nRunning: health checks \u2192 CloudWatch metrics \u2192 integration tests",
+        "async": true,
+        "priority": "high",
+        "show_in_ui": true,
+        "event_type": "validation_started"
       },
-      "position": {"x": 816, "y": 0}
+      "position": {
+        "x": 816,
+        "y": 0
+      },
+      "enabled": true,
+      "description": "Notify that post-deployment validation has started"
     },
     {
       "id": "check_health_endpoints",
@@ -54,7 +78,11 @@
         "stream_tool_events": false,
         "message": "## Step 1: Health Check\n\nRun HTTP checks against the API Gateway endpoints.\n\nAPI Gateway URL: {{variables.api_gw_url}}\n\nFor each of the 3 endpoints below, use `execute_local_command` to curl and capture the HTTP status code and response time:\n1. GET {{variables.api_gw_url}}/health\n2. GET {{variables.api_gw_url}}/api/products\n3. POST {{variables.api_gw_url}}/api/checkout  (body: {\"item_id\": 1, \"qty\": 1})\n\nFor each request use: curl -s -w \"\\n%{http_code} %{time_total}\" -o /tmp/resp_<name>.txt <url>\nThen read the status code and latency from the curl output.\nFor POST: add -X POST -H 'Content-Type: application/json' -d '{\"item_id\":1,\"qty\":1}'\n\nReturn JSON ONLY (no markdown):\n{\n  \"health\": {\"url\": \"/health\", \"http_code\": 200, \"latency_ms\": 45, \"status\": \"pass\", \"body_preview\": \"...\"},\n  \"products\": {\"url\": \"/api/products\", \"http_code\": 200, \"latency_ms\": 38, \"status\": \"pass\", \"body_preview\": \"...\"},\n  \"checkout\": {\"url\": \"/api/checkout\", \"http_code\": 500, \"latency_ms\": 12, \"status\": \"fail\", \"body_preview\": \"...\"},\n  \"overall\": \"fail\",\n  \"failed_endpoints\": [\"/api/checkout\"]\n}"
       },
-      "position": {"x": 1200, "y": -200}
+      "position": {
+        "x": 1200,
+        "y": -200
+      },
+      "enabled": true
     },
     {
       "id": "get_cloudwatch_metrics",
@@ -65,7 +93,11 @@
         "stream_tool_events": false,
         "message": "## Step 2: CloudWatch 5xx Metrics\n\nFetch the API Gateway 5xx error metrics for the last 15 minutes.\n\nAlarm triggered at: {{steps.parse_alarm_event.output.alarm_time}}\nAPI Gateway ID: {{variables.api_gw_id}}\nAWS Region: {{variables.aws_region}}\n\nUse `aws_cli_execute` with:\n- user_id: \"{{variables.user_id}}\"\n- aws_region: \"{{variables.aws_region}}\"\n- aws_access_key_id: \"{{variables.aws_access_key_id}}\"\n- aws_secret_access_key: \"{{variables.aws_secret_access_key}}\"\n- command: fetch `5XXError` metric from namespace `AWS/ApiGateway`\n  - dimensions: ApiId={{variables.api_gw_id}}, Stage=$default\n  - period: 60 seconds\n  - statistics: Sum\n  - time window: 15 minutes before alarm_time to 5 minutes after alarm_time\n\nAlso fetch `Count` (total requests) in the same window to compute error rate.\n\nReturn JSON ONLY:\n{\n  \"total_5xx_errors\": 12,\n  \"total_requests\": 15,\n  \"error_rate_percent\": 80.0,\n  \"peak_errors_per_minute\": 5,\n  \"time_window_start\": \"2026-04-23T10:00:00Z\",\n  \"time_window_end\": \"2026-04-23T10:15:00Z\",\n  \"datapoints\": [\n    {\"timestamp\": \"2026-04-23T10:01:00Z\", \"5xx_count\": 5},\n    {\"timestamp\": \"2026-04-23T10:02:00Z\", \"5xx_count\": 7}\n  ]\n}"
       },
-      "position": {"x": 1200, "y": 0}
+      "position": {
+        "x": 1200,
+        "y": 0
+      },
+      "enabled": true
     },
     {
       "id": "run_integration_tests",
@@ -76,7 +108,11 @@
         "stream_tool_events": false,
         "message": "## Step 3: Integration Tests\n\nRun the integration test suite against the deployed API.\n\nUse `aws_cli_execute` to invoke the integration test Lambda:\n- user_id: \"{{variables.user_id}}\"\n- aws_region: \"{{variables.aws_region}}\"\n- aws_access_key_id: \"{{variables.aws_access_key_id}}\"\n- aws_secret_access_key: \"{{variables.aws_secret_access_key}}\"\n- command: \"lambda invoke --function-name demo-5xx-integration-tests --region {{variables.aws_region}} --payload '{\\\"api_gw_url\\\": \\\"{{variables.api_gw_url}}\\\"}' --cli-binary-format raw-in-base64-out /tmp/test_output.json && cat /tmp/test_output.json\"\n\nIf lambda invoke fails, fall back to running curl tests directly using `execute_local_command` against each endpoint.\n\nReturn JSON ONLY:\n{\n  \"total\": 3,\n  \"passed\": 1,\n  \"failed\": 2,\n  \"overall\": \"fail\",\n  \"tests\": [\n    {\"name\": \"health\", \"http_code\": 200, \"latency_ms\": 45, \"status\": \"pass\"},\n    {\"name\": \"products\", \"http_code\": 200, \"latency_ms\": 38, \"status\": \"pass\"},\n    {\"name\": \"checkout\", \"http_code\": 500, \"latency_ms\": 12, \"status\": \"fail\", \"error\": \"Internal Server Error\"}\n  ]\n}"
       },
-      "position": {"x": 1200, "y": 200}
+      "position": {
+        "x": 1200,
+        "y": 200
+      },
+      "enabled": true
     },
     {
       "id": "normalize_validation_results",
@@ -86,7 +122,11 @@
         "language": "javascript",
         "code": "// Merge outputs from the 3 parallel validation steps into a single object\nfunction safeJSON(val) {\n  if (!val) return {};\n  if (typeof val === 'object') return val;\n  try { return JSON.parse(val); } catch { return { raw: String(val) }; }\n}\n\nconst healthOut = safeJSON(context?.steps?.check_health_endpoints?.output?.output);\nconst metricsOut = safeJSON(context?.steps?.get_cloudwatch_metrics?.output?.output);\nconst testsOut = safeJSON(context?.steps?.run_integration_tests?.output?.output);\nconst alarmInfo = safeJSON(context?.steps?.parse_alarm_event?.output);\n\nconst healthOverall = healthOut?.overall || 'unknown';\nconst testsOverall = testsOut?.overall || 'unknown';\nconst total5xx = metricsOut?.total_5xx_errors ?? 0;\n\nconst hasFailure = healthOverall === 'fail' || testsOverall === 'fail' || total5xx > 0;\n\nreturn {\n  health_check: healthOut,\n  cloudwatch_metrics: metricsOut,\n  integration_tests: testsOut,\n  alarm_info: alarmInfo,\n  summary: {\n    health_overall: healthOverall,\n    tests_overall: testsOverall,\n    total_5xx_errors: total5xx,\n    has_failure: hasFailure,\n    validation_time: new Date().toISOString()\n  }\n};"
       },
-      "position": {"x": 1584, "y": 0}
+      "position": {
+        "x": 1584,
+        "y": 0
+      },
+      "enabled": true
     },
     {
       "id": "ai_validation_analysis",
@@ -95,9 +135,13 @@
       "config": {
         "agent_id": "{{variables.agent_id}}",
         "stream_tool_events": false,
-        "message": "## Step 4: Validation Analysis\n\nAnalyze all validation results and produce a GO/NO-GO verdict.\n\nHere are the collected results:\n\n**Health Check Results:**\n{{steps.normalize_validation_results.output.health_check}}\n\n**CloudWatch 5xx Metrics:**\n{{steps.normalize_validation_results.output.cloudwatch_metrics}}\n\n**Integration Test Results:**\n{{steps.normalize_validation_results.output.integration_tests}}\n\n**Alarm Info:**\n{{steps.normalize_validation_results.output.alarm_info}}\n\nVERDICT RULES:\n- GO: all health checks pass AND total_5xx_errors == 0 AND all integration tests pass\n- NO-GO: any health check fails OR total_5xx_errors > 0 OR any integration test fails\n- CONDITIONAL: health checks pass but total_5xx_errors > 0 but < 3 (intermittent)\n\nReturn JSON ONLY (no markdown):\n{\n  \"verdict\": \"NO-GO\",\n  \"confidence\": \"HIGH\",\n  \"summary\": \"The /api/checkout endpoint is returning HTTP 500 errors after the latest deployment. 12 5xx errors detected in the last 15 minutes with an 80% error rate.\",\n  \"root_cause\": \"NullPointerException in checkout handler — cart_service.get_cart() returned None. This was introduced in v2 where the cart service refactor was not propagated to the checkout Lambda.\",\n  \"affected_endpoints\": [\"/api/checkout\"],\n  \"total_5xx_errors\": 12,\n  \"error_rate_percent\": 80.0,\n  \"recommended_action\": \"Immediate rollback to stable v1. Run: ./infra/deploy.sh rollback\",\n  \"severity\": \"HIGH\"\n}"
+        "message": "## Step 4: Validation Analysis\n\nAnalyze all validation results and produce a GO/NO-GO verdict.\n\nHere are the collected results:\n\n**Health Check Results:**\n{{steps.normalize_validation_results.output.health_check}}\n\n**CloudWatch 5xx Metrics:**\n{{steps.normalize_validation_results.output.cloudwatch_metrics}}\n\n**Integration Test Results:**\n{{steps.normalize_validation_results.output.integration_tests}}\n\n**Alarm Info:**\n{{steps.normalize_validation_results.output.alarm_info}}\n\nVERDICT RULES:\n- GO: all health checks pass AND total_5xx_errors == 0 AND all integration tests pass\n- NO-GO: any health check fails OR total_5xx_errors > 0 OR any integration test fails\n- CONDITIONAL: health checks pass but total_5xx_errors > 0 but < 3 (intermittent)\n\nReturn JSON ONLY (no markdown):\n{\n  \"verdict\": \"NO-GO\",\n  \"confidence\": \"HIGH\",\n  \"summary\": \"The /api/checkout endpoint is returning HTTP 500 errors after the latest deployment. 12 5xx errors detected in the last 15 minutes with an 80% error rate.\",\n  \"root_cause\": \"NullPointerException in checkout handler \u2014 cart_service.get_cart() returned None. This was introduced in v2 where the cart service refactor was not propagated to the checkout Lambda.\",\n  \"affected_endpoints\": [\"/api/checkout\"],\n  \"total_5xx_errors\": 12,\n  \"error_rate_percent\": 80.0,\n  \"recommended_action\": \"Immediate rollback to stable v1. Run: ./infra/deploy.sh rollback\",\n  \"severity\": \"HIGH\"\n}"
       },
-      "position": {"x": 1968, "y": 0}
+      "position": {
+        "x": 1968,
+        "y": 0
+      },
+      "enabled": true
     },
     {
       "id": "check_validation_result",
@@ -108,7 +152,11 @@
         "then_node": "post_github_issue_pass",
         "else_node": "post_github_issue_fail"
       },
-      "position": {"x": 2352, "y": 0}
+      "position": {
+        "x": 2352,
+        "y": 0
+      },
+      "enabled": true
     },
     {
       "id": "post_github_issue_pass",
@@ -117,9 +165,13 @@
       "config": {
         "agent_id": "{{variables.agent_id}}",
         "stream_tool_events": false,
-        "message": "## Step 5a: Post Validation PASSED Report\n\nCreate a GitHub issue documenting the successful validation.\n\nValidation results:\n{{steps.ai_validation_analysis.output.output}}\n\nUse `github_create_issue` with:\n- user_id: \"{{variables.user_id}}\"\n- github_token: \"{{variables.github_token}}\"\n- repo_url: \"{{variables.github_repo_url}}\"\n- title: \"✅ Deployment Validation PASSED — demo-aws-5xx-app\"\n- labels: [\"validation-passed\"]\n- body: A markdown report including:\n  - Verdict: ✅ GO\n  - Alarm that triggered: {{steps.parse_alarm_event.output.alarm_name}}\n  - Health checks: all passed\n  - 5xx error count: 0\n  - Integration tests: all passed\n  - Validation time: {{steps.normalize_validation_results.output.summary.validation_time}}\n  - Summary from AI analysis\n\nReturn JSON ONLY:\n{\"issue_url\": \"https://github.com/...\", \"issue_number\": 1, \"status\": \"created\"}"
+        "message": "## Step 5a: Post Validation PASSED Report\n\nCreate a GitHub issue documenting the successful validation.\n\nValidation results:\n{{steps.ai_validation_analysis.output.output}}\n\nUse `github_create_issue` with:\n- user_id: \"{{variables.user_id}}\"\n- github_token: \"{{variables.github_token}}\"\n- repo_url: \"{{variables.github_repo_url}}\"\n- title: \"\u2705 Deployment Validation PASSED \u2014 demo-aws-5xx-app\"\n- labels: [\"validation-passed\"]\n- body: A markdown report including:\n  - Verdict: \u2705 GO\n  - Alarm that triggered: {{steps.parse_alarm_event.output.alarm_name}}\n  - Health checks: all passed\n  - 5xx error count: 0\n  - Integration tests: all passed\n  - Validation time: {{steps.normalize_validation_results.output.summary.validation_time}}\n  - Summary from AI analysis\n\nReturn JSON ONLY:\n{\"issue_url\": \"https://github.com/...\", \"issue_number\": 1, \"status\": \"created\"}"
       },
-      "position": {"x": 2736, "y": -200}
+      "position": {
+        "x": 2736,
+        "y": -200
+      },
+      "enabled": true
     },
     {
       "id": "post_github_issue_fail",
@@ -128,9 +180,13 @@
       "config": {
         "agent_id": "{{variables.agent_id}}",
         "stream_tool_events": false,
-        "message": "## Step 5b: Post Validation FAILED Report\n\nCreate a GitHub issue documenting the deployment failure.\n\nValidation results:\n{{steps.ai_validation_analysis.output.output}}\n\nUse `github_create_issue` with:\n- user_id: \"{{variables.user_id}}\"\n- github_token: \"{{variables.github_token}}\"\n- repo_url: \"{{variables.github_repo_url}}\"\n- title: \"🚨 Deployment Validation FAILED — demo-aws-5xx-app\"\n- labels: [\"validation-failed\", \"deployment-failure\", \"needs-rollback\"]\n- body: A markdown report with:\n  ## 🚨 Deployment Validation FAILED\n  **Verdict:** NO-GO | **Severity:** HIGH\n  **Alarm:** {{steps.parse_alarm_event.output.alarm_name}}\n  **Triggered at:** {{steps.parse_alarm_event.output.alarm_time}}\n  \n  ## Findings\n  - Total 5xx errors: (from analysis)\n  - Error rate: (from analysis)\n  - Failed endpoints: (from analysis)\n  \n  ## Root Cause\n  (from AI analysis)\n  \n  ## Health Check Results\n  (table of endpoints and status codes)\n  \n  ## Integration Test Results\n  (table of tests)\n  \n  ## Recommended Action\n  (from AI analysis)\n  \n  ## Rollback Command\n  ```bash\n  ./infra/deploy.sh rollback\n  ```\n  \n  ---\n  *Generated by Aziron Post-Deployment Validation Flow*\n\nReturn JSON ONLY:\n{\"issue_url\": \"https://github.com/...\", \"issue_number\": 1, \"status\": \"created\"}"
+        "message": "## Step 5b: Post Validation FAILED Report\n\nCreate a GitHub issue documenting the deployment failure.\n\nValidation results:\n{{steps.ai_validation_analysis.output.output}}\n\nUse `github_create_issue` with:\n- user_id: \"{{variables.user_id}}\"\n- github_token: \"{{variables.github_token}}\"\n- repo_url: \"{{variables.github_repo_url}}\"\n- title: \"\ud83d\udea8 Deployment Validation FAILED \u2014 demo-aws-5xx-app\"\n- labels: [\"validation-failed\", \"deployment-failure\", \"needs-rollback\"]\n- body: A markdown report with:\n  ## \ud83d\udea8 Deployment Validation FAILED\n  **Verdict:** NO-GO | **Severity:** HIGH\n  **Alarm:** {{steps.parse_alarm_event.output.alarm_name}}\n  **Triggered at:** {{steps.parse_alarm_event.output.alarm_time}}\n  \n  ## Findings\n  - Total 5xx errors: (from analysis)\n  - Error rate: (from analysis)\n  - Failed endpoints: (from analysis)\n  \n  ## Root Cause\n  (from AI analysis)\n  \n  ## Health Check Results\n  (table of endpoints and status codes)\n  \n  ## Integration Test Results\n  (table of tests)\n  \n  ## Recommended Action\n  (from AI analysis)\n  \n  ## Rollback Command\n  ```bash\n  ./infra/deploy.sh rollback\n  ```\n  \n  ---\n  *Generated by Aziron Post-Deployment Validation Flow*\n\nReturn JSON ONLY:\n{\"issue_url\": \"https://github.com/...\", \"issue_number\": 1, \"status\": \"created\"}"
       },
-      "position": {"x": 2736, "y": 200}
+      "position": {
+        "x": 2736,
+        "y": 200
+      },
+      "enabled": true
     },
     {
       "id": "publish_validation_metric",
@@ -141,33 +197,136 @@
         "stream_tool_events": false,
         "message": "## Step 6: Publish Validation Result Metric\n\nPublish the validation outcome as a custom CloudWatch metric.\n\nVerdict from analysis: {{steps.ai_validation_analysis.output.output.verdict}}\n\nUse `aws_cli_execute` with:\n- user_id: \"{{variables.user_id}}\"\n- aws_region: \"{{variables.aws_region}}\"\n- aws_access_key_id: \"{{variables.aws_access_key_id}}\"\n- aws_secret_access_key: \"{{variables.aws_secret_access_key}}\"\n- command: publish metric to namespace `Aziron/DeployValidation`\n  - MetricName: ValidationResult\n  - Value: 1 if verdict is GO, 0 if NO-GO or CONDITIONAL\n  - Unit: None\n  - Dimensions: FunctionName=demo-aws-5xx-app, AlarmName={{steps.parse_alarm_event.output.alarm_name}}\n\nAlso publish a second metric:\n  - MetricName: ValidationDurationSeconds\n  - Value: seconds elapsed since {{steps.parse_alarm_event.output.alarm_time}}\n  - Unit: Seconds\n\nReturn JSON ONLY:\n{\"status\": \"published\", \"verdict_value\": 0, \"namespace\": \"Aziron/DeployValidation\"}"
       },
-      "position": {"x": 3120, "y": 0}
+      "position": {
+        "x": 3120,
+        "y": 0
+      },
+      "enabled": true
     },
     {
       "id": "notify_complete",
       "type": "notification",
       "name": "Notify Validation Complete",
       "config": {
-        "message": "{{steps.ai_validation_analysis.output.output.verdict == 'GO' && '✅' || '🚨'}} Post-deployment validation complete\nVerdict: {{steps.ai_validation_analysis.output.output.verdict}}\nAffected: {{steps.ai_validation_analysis.output.output.affected_endpoints}}\nAction: {{steps.ai_validation_analysis.output.output.recommended_action}}"
+        "message": "{{steps.ai_validation_analysis.output.output.verdict == 'GO' && '\u2705' || '\ud83d\udea8'}} Post-deployment validation complete\nVerdict: {{steps.ai_validation_analysis.output.output.verdict}}\nAffected: {{steps.ai_validation_analysis.output.output.affected_endpoints}}\nAction: {{steps.ai_validation_analysis.output.output.recommended_action}}",
+        "async": true,
+        "priority": "high",
+        "show_in_ui": true,
+        "event_type": "validation_complete"
       },
-      "position": {"x": 3504, "y": 0}
+      "position": {
+        "x": 3504,
+        "y": 0
+      },
+      "enabled": true,
+      "description": "Notify validation complete with verdict"
     }
   ],
   "connections": [
-    {"id": "conn_1", "source": "receive_alarm", "target": "parse_alarm_event"},
-    {"id": "conn_2", "source": "parse_alarm_event", "target": "notify_validation_started"},
-    {"id": "conn_3", "source": "notify_validation_started", "target": "check_health_endpoints"},
-    {"id": "conn_4", "source": "notify_validation_started", "target": "get_cloudwatch_metrics"},
-    {"id": "conn_5", "source": "notify_validation_started", "target": "run_integration_tests"},
-    {"id": "conn_6", "source": "check_health_endpoints", "target": "normalize_validation_results"},
-    {"id": "conn_7", "source": "get_cloudwatch_metrics", "target": "normalize_validation_results"},
-    {"id": "conn_8", "source": "run_integration_tests", "target": "normalize_validation_results"},
-    {"id": "conn_9", "source": "normalize_validation_results", "target": "ai_validation_analysis"},
-    {"id": "conn_10", "source": "ai_validation_analysis", "target": "check_validation_result"},
-    {"id": "conn_11", "source": "check_validation_result", "target": "post_github_issue_pass"},
-    {"id": "conn_12", "source": "check_validation_result", "target": "post_github_issue_fail"},
-    {"id": "conn_13", "source": "post_github_issue_pass", "target": "publish_validation_metric"},
-    {"id": "conn_14", "source": "post_github_issue_fail", "target": "publish_validation_metric"},
-    {"id": "conn_15", "source": "publish_validation_metric", "target": "notify_complete"}
+    {
+      "id": "conn_1",
+      "source_node": "receive_alarm",
+      "source_port": "source",
+      "target_node": "parse_alarm_event",
+      "target_port": "target"
+    },
+    {
+      "id": "conn_2",
+      "source_node": "parse_alarm_event",
+      "source_port": "source",
+      "target_node": "notify_validation_started",
+      "target_port": "target"
+    },
+    {
+      "id": "conn_3",
+      "source_node": "notify_validation_started",
+      "source_port": "source",
+      "target_node": "check_health_endpoints",
+      "target_port": "target"
+    },
+    {
+      "id": "conn_4",
+      "source_node": "notify_validation_started",
+      "source_port": "source",
+      "target_node": "get_cloudwatch_metrics",
+      "target_port": "target"
+    },
+    {
+      "id": "conn_5",
+      "source_node": "notify_validation_started",
+      "source_port": "source",
+      "target_node": "run_integration_tests",
+      "target_port": "target"
+    },
+    {
+      "id": "conn_6",
+      "source_node": "check_health_endpoints",
+      "source_port": "source",
+      "target_node": "normalize_validation_results",
+      "target_port": "target"
+    },
+    {
+      "id": "conn_7",
+      "source_node": "get_cloudwatch_metrics",
+      "source_port": "source",
+      "target_node": "normalize_validation_results",
+      "target_port": "target"
+    },
+    {
+      "id": "conn_8",
+      "source_node": "run_integration_tests",
+      "source_port": "source",
+      "target_node": "normalize_validation_results",
+      "target_port": "target"
+    },
+    {
+      "id": "conn_9",
+      "source_node": "normalize_validation_results",
+      "source_port": "source",
+      "target_node": "ai_validation_analysis",
+      "target_port": "target"
+    },
+    {
+      "id": "conn_10",
+      "source_node": "ai_validation_analysis",
+      "source_port": "source",
+      "target_node": "check_validation_result",
+      "target_port": "target"
+    },
+    {
+      "id": "conn_11",
+      "source_node": "check_validation_result",
+      "source_port": "source",
+      "target_node": "post_github_issue_pass",
+      "target_port": "target"
+    },
+    {
+      "id": "conn_12",
+      "source_node": "check_validation_result",
+      "source_port": "source",
+      "target_node": "post_github_issue_fail",
+      "target_port": "target"
+    },
+    {
+      "id": "conn_13",
+      "source_node": "post_github_issue_pass",
+      "source_port": "source",
+      "target_node": "publish_validation_metric",
+      "target_port": "target"
+    },
+    {
+      "id": "conn_14",
+      "source_node": "post_github_issue_fail",
+      "source_port": "source",
+      "target_node": "publish_validation_metric",
+      "target_port": "target"
+    },
+    {
+      "id": "conn_15",
+      "source_node": "publish_validation_metric",
+      "source_port": "source",
+      "target_node": "notify_complete",
+      "target_port": "target"
+    }
   ]
 }
