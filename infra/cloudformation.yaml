@@ -1,0 +1,307 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: "demo-aws-app-5xx-check: Lambda + API Gateway + CloudWatch + EventBridge → Aziron"
+
+Parameters:
+  AzironWebhookUrl:
+    Type: String
+    Default: "https://aziron-bot.loca.lt/PLACEHOLDER"
+    Description: "Aziron flow webhook URL (update after flow is created)"
+
+Resources:
+
+  # ─── IAM Role: demo app Lambda ─────────────────────────────────────────────
+  DemoAppRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: demo-5xx-app-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: lambda.amazonaws.com}
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: cloudwatch-put
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action: cloudwatch:PutMetricData
+                Resource: "*"
+
+  # ─── Lambda: demo app (stable v1 inline) ────────────────────────────────────
+  DemoAppFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: demo-aws-5xx-app
+      Runtime: python3.12
+      Handler: index.lambda_handler
+      Role: !GetAtt DemoAppRole.Arn
+      Timeout: 10
+      Code:
+        ZipFile: |
+          import json, time
+          def lambda_handler(event, context):
+              path = event.get("rawPath", "/")
+              if path == "/health":
+                  return {"statusCode": 200, "headers": {"Content-Type": "application/json"},
+                          "body": json.dumps({"status": "ok", "version": "v1", "timestamp": int(time.time())})}
+              if path == "/api/products":
+                  return {"statusCode": 200, "headers": {"Content-Type": "application/json"},
+                          "body": json.dumps([{"id": 1, "name": "Widget A", "price": 9.99},
+                                              {"id": 2, "name": "Widget B", "price": 19.99}])}
+              if path == "/api/checkout":
+                  return {"statusCode": 200, "headers": {"Content-Type": "application/json"},
+                          "body": json.dumps({"order_id": f"ord-{int(time.time())}", "status": "confirmed"})}
+              return {"statusCode": 404, "body": json.dumps({"error": "Not found"})}
+
+  # ─── Lambda Version + Alias ──────────────────────────────────────────────────
+  DemoAppVersionStable:
+    Type: AWS::Lambda::Version
+    Properties:
+      FunctionName: !Ref DemoAppFunction
+      Description: "v1-stable"
+
+  DemoAppAliasLive:
+    Type: AWS::Lambda::Alias
+    Properties:
+      FunctionName: !Ref DemoAppFunction
+      FunctionVersion: !GetAtt DemoAppVersionStable.Version
+      Name: live
+      Description: "Points to the currently deployed version"
+
+  # ─── API Gateway HTTP API (v2) ───────────────────────────────────────────────
+  DemoApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: demo-5xx-api
+      ProtocolType: HTTP
+      Description: "Demo app — POST /api/checkout fails in v2"
+
+  DemoApiIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref DemoApi
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub
+        - "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AliasArn}/invocations"
+        - AliasArn: !Ref DemoAppAliasLive
+      PayloadFormatVersion: "2.0"
+
+  RouteHealth:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref DemoApi
+      RouteKey: "GET /health"
+      Target: !Sub "integrations/${DemoApiIntegration}"
+
+  RouteProducts:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref DemoApi
+      RouteKey: "GET /api/products"
+      Target: !Sub "integrations/${DemoApiIntegration}"
+
+  RouteCheckoutGet:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref DemoApi
+      RouteKey: "GET /api/checkout"
+      Target: !Sub "integrations/${DemoApiIntegration}"
+
+  RouteCheckoutPost:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      ApiId: !Ref DemoApi
+      RouteKey: "POST /api/checkout"
+      Target: !Sub "integrations/${DemoApiIntegration}"
+
+  DemoApiStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      ApiId: !Ref DemoApi
+      StageName: "$default"
+      AutoDeploy: true
+
+  LambdaPermissionApiGw:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref DemoAppAliasLive
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${DemoApi}/*"
+
+  # ─── CloudWatch Alarm: 5xx spike ────────────────────────────────────────────
+  Alarm5xx:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: demo-5xx-ApiGw5xxAlarm
+      AlarmDescription: "API Gateway 5xx errors > 3 in 1 minute — triggers Aziron validation flow"
+      Namespace: AWS/ApiGateway
+      MetricName: 5XXError
+      Dimensions:
+        - Name: ApiId
+          Value: !Ref DemoApi
+      Period: 60
+      EvaluationPeriods: 1
+      Threshold: 3
+      ComparisonOperator: GreaterThanThreshold
+      Statistic: Sum
+      TreatMissingData: notBreaching
+
+  # ─── IAM Role: forwarder Lambda ─────────────────────────────────────────────
+  ForwarderRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: demo-5xx-forwarder-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: lambda.amazonaws.com}
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  # ─── Lambda: EventBridge → Aziron forwarder ─────────────────────────────────
+  ForwarderFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: demo-5xx-aziron-forwarder
+      Runtime: python3.12
+      Handler: index.lambda_handler
+      Role: !GetAtt ForwarderRole.Arn
+      Timeout: 15
+      Environment:
+        Variables:
+          AZIRON_WEBHOOK_URL: !Ref AzironWebhookUrl
+      Code:
+        ZipFile: |
+          import json, os, urllib.request, urllib.error
+          URL = os.environ.get("AZIRON_WEBHOOK_URL", "")
+          def lambda_handler(event, context):
+              print(f"Forwarding alarm to Aziron: {json.dumps(event)[:300]}")
+              if not URL:
+                  return {"statusCode": 500, "body": "AZIRON_WEBHOOK_URL not configured"}
+              payload = json.dumps(event).encode("utf-8")
+              req = urllib.request.Request(URL, data=payload,
+                                           headers={"Content-Type": "application/json"}, method="POST")
+              try:
+                  with urllib.request.urlopen(req, timeout=15) as resp:
+                      body = resp.read().decode("utf-8")
+                      print(f"Aziron: {resp.status} {body[:200]}")
+                      return {"statusCode": resp.status}
+              except urllib.error.HTTPError as e:
+                  print(f"HTTP error {e.code}: {e.read().decode()[:200]}")
+                  return {"statusCode": e.code}
+              except Exception as e:
+                  print(f"Error: {e}")
+                  return {"statusCode": 500, "body": str(e)}
+
+  # ─── EventBridge Rule: alarm → forwarder ────────────────────────────────────
+  AlarmToAzironRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: demo-5xx-alarm-to-aziron
+      Description: "Routes demo-5xx-ApiGw5xxAlarm ALARM state to Aziron validation flow"
+      EventPattern:
+        source:
+          - aws.cloudwatch
+        detail-type:
+          - CloudWatch Alarm State Change
+        detail:
+          alarmName:
+            - demo-5xx-ApiGw5xxAlarm
+          state:
+            value:
+              - ALARM
+      State: ENABLED
+      Targets:
+        - Id: AzironForwarder
+          Arn: !GetAtt ForwarderFunction.Arn
+
+  ForwarderPermissionEventBridge:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ForwarderFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt AlarmToAzironRule.Arn
+
+  # ─── Integration Test Lambda (called by Aziron agent) ───────────────────────
+  IntegrationTestRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: demo-5xx-integration-test-role
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: {Service: lambda.amazonaws.com}
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+  IntegrationTestFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      FunctionName: demo-5xx-integration-tests
+      Runtime: python3.12
+      Handler: index.lambda_handler
+      Role: !GetAtt IntegrationTestRole.Arn
+      Timeout: 30
+      Environment:
+        Variables:
+          API_GW_URL: !Sub "https://${DemoApi}.execute-api.${AWS::Region}.amazonaws.com"
+      Code:
+        ZipFile: |
+          import json, os, time, urllib.request, urllib.error
+          BASE_URL = os.environ.get("API_GW_URL", "")
+          def run_test(name, url, method="GET", body=None, expected=200):
+              t = time.time()
+              try:
+                  data = json.dumps(body).encode() if body else None
+                  h = {"Content-Type": "application/json"} if data else {}
+                  req = urllib.request.Request(url, data=data, headers=h, method=method)
+                  with urllib.request.urlopen(req, timeout=10) as r:
+                      ms = int((time.time()-t)*1000); s = r.status; rb = r.read().decode()[:200]
+              except urllib.error.HTTPError as e:
+                  ms = int((time.time()-t)*1000); s = e.code; rb = e.read().decode()[:200]
+              except Exception as e:
+                  return {"name": name, "status": "error", "error": str(e)}
+              return {"name": name, "url": url, "http_code": s, "expected": expected,
+                      "latency_ms": ms, "status": "pass" if s==expected else "fail", "preview": rb}
+          def lambda_handler(event, context):
+              base = event.get("api_gw_url") or BASE_URL
+              if not base:
+                  return {"statusCode": 400, "body": json.dumps({"error": "api_gw_url required"})}
+              tests = [run_test("health", f"{base}/health"),
+                       run_test("products", f"{base}/api/products"),
+                       run_test("checkout", f"{base}/api/checkout", "POST", {"item_id":1,"qty":1})]
+              passed = sum(1 for t in tests if t.get("status")=="pass")
+              result = {"total": len(tests), "passed": passed, "failed": len(tests)-passed,
+                        "overall": "pass" if passed==len(tests) else "fail", "tests": tests}
+              return {"statusCode": 200, "body": json.dumps(result)}
+
+Outputs:
+  ApiGatewayUrl:
+    Description: "API Gateway base URL"
+    Value: !Sub "https://${DemoApi}.execute-api.${AWS::Region}.amazonaws.com"
+    Export:
+      Name: demo-5xx-ApiGwUrl
+
+  ApiGatewayId:
+    Description: "API Gateway ID (for CloudWatch dimensions)"
+    Value: !Ref DemoApi
+    Export:
+      Name: demo-5xx-ApiGwId
+
+  DemoAppFunctionArn:
+    Description: "Demo app Lambda ARN"
+    Value: !GetAtt DemoAppFunction.Arn
+
+  ForwarderFunctionArn:
+    Description: "Forwarder Lambda ARN"
+    Value: !GetAtt ForwarderFunction.Arn
