@@ -140,7 +140,7 @@ Resources:
       AlarmName: demo-5xx-ApiGw5xxAlarm
       AlarmDescription: "API Gateway 5xx errors > 3 in 1 minute — triggers Aziron validation flow"
       Namespace: AWS/ApiGateway
-      MetricName: 5XXError
+      MetricName: 5xx
       Dimensions:
         - Name: ApiId
           Value: !Ref DemoApi

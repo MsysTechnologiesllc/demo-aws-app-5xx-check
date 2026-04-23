@@ -24,13 +24,22 @@ def lambda_handler(event, context):
         }
 
     if path == "/api/checkout":
-        # BUG introduced in v2: cart_service was refactored but checkout was not updated
-        cart_service = None
-        cart = cart_service.get_cart()  # NullPointerException equivalent
-        return {
-            "statusCode": 200,
-            "body": json.dumps({"order_id": cart["order_id"]}),
-        }
+        # BUG introduced in v2: cart_service was refactored but checkout was not updated.
+        # Explicitly return 500 so API Gateway records it in the 5XXError CloudWatch metric.
+        try:
+            cart_service = None
+            cart = cart_service.get_cart()  # AttributeError
+            return {"statusCode": 200, "body": json.dumps({"order_id": cart["order_id"]})}
+        except Exception as exc:
+            return {
+                "statusCode": 500,
+                "headers": {"Content-Type": "application/json"},
+                "body": json.dumps({
+                    "error": "Internal Server Error",
+                    "message": f"NullPointerException: cart_service.get_cart() returned None — {exc}",
+                    "path": "/api/checkout",
+                }),
+            }
 
     return {
         "statusCode": 404,
