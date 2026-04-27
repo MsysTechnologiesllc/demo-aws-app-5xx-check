@@ -1,15 +1,15 @@
 # Incident Report — Auto-Rollback Executed
 
-**Date:** 2026-04-27T07:48:51.360Z
+**Date:** 2026-04-27T08:04:42.005Z
 **Alarm:** demo-5xx-ApiGw5xxAlarm
 
 ## What Happened
 
-A CloudWatch 5xx alarm fired shortly after a new Lambda deployment was promoted to the `live` alias. Post-deployment validation detected elevated HTTP 500 error rates across the API Gateway endpoints. Health checks against `/health`, `/orders`, and `/checkout` confirmed that the `/checkout` endpoint was returning 500 Internal Server Error responses, while `/health` and `/orders` remained operational. Integration tests corroborated the failure, with the checkout integration test failing due to an unhandled exception in the checkout handler.
+A CloudWatch 5xx alarm fired shortly after a new Lambda deployment was promoted to the `live` alias. Post-deployment validation detected HTTP 500 errors on the `/checkout` endpoint during automated health checks and integration tests. The `/health` and `/products` endpoints remained healthy, isolating the fault to the checkout handler.
 
 ## Root Cause
 
-The root cause was identified as a broken integration between the checkout Lambda handler and the `cart_service.get_cart()` function. The newly deployed version introduced a call to `cart_service.get_cart()` that failed at runtime — likely due to a missing dependency, an incompatible interface change, or an unhandled exception path in the cart service client. This caused all requests to the `/checkout` endpoint to return HTTP 500 responses, triggering the CloudWatch alarm `demo-5xx-ApiGw5xxAlarm`.
+The checkout Lambda handler invoked `cart_service.get_cart()` which was not compatible with the newly deployed code. The integration between the checkout handler and the cart service broke due to a missing or incompatible dependency introduced in the latest deployment, causing unhandled exceptions and 500 responses on all `POST /checkout` requests.
 
 ## Auto-Remediation
 
