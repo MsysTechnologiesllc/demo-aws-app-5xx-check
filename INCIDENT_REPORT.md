@@ -1,6 +1,6 @@
 # Incident Report — Auto-Rollback Executed
 
-**Date:** 2026-04-27T04:45:42.090Z
+**Date:** 2026-04-27T06:29:51.577Z
 **Alarm:** demo-5xx-ApiGw5xxAlarm
 
 ## What Happened
