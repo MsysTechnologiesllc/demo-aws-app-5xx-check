@@ -1,15 +1,15 @@
 # Incident Report — Auto-Rollback Executed
 
-**Date:** 2026-04-28T11:43:23.034Z
+**Date:** 2026-04-29T04:45:16.465Z
 **Alarm:** demo-5xx-ApiGw5xxAlarm
 
 ## What Happened
 
-A deployment triggered a CloudWatch 5xx alarm on the API Gateway. Post-deployment validation detected elevated 5xx error rates across one or more endpoints. Health checks and integration tests confirmed that the `/checkout` endpoint was returning HTTP 500 responses, indicating a regression introduced by the latest Lambda deployment.
+A deployment triggered a CloudWatch 5xx alarm on the API Gateway. Post-deployment validation detected elevated HTTP 5xx error rates across one or more endpoints. The Aziron Post-Deployment Validation Agent was invoked, performed health checks, fetched CloudWatch metrics, and executed integration tests — all of which confirmed a degraded service state. A NO-GO verdict was issued and an automatic rollback was initiated.
 
 ## Root Cause
 
-The deployed Lambda version contained a broken integration with `cart_service.get_cart()` inside the checkout handler. The function failed to retrieve cart data correctly, causing unhandled exceptions that propagated as 500 Internal Server Errors to API Gateway consumers.
+The root cause was identified as a broken integration between the checkout handler and the `cart_service.get_cart()` function. The newly deployed Lambda version introduced a regression in the `/checkout` endpoint, causing it to return HTTP 500 errors. The integration test targeting `POST /checkout` failed consistently, confirming the fault was isolated to this handler's dependency on the cart service.
 
 ## Auto-Remediation
 
