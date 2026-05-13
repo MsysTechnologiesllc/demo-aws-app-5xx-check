@@ -1,15 +1,15 @@
 # Incident Report — Auto-Rollback Executed
 
-**Date:** 2026-05-13T10:33:07.371Z
+**Date:** 2026-05-13T12:40:42.573Z
 **Alarm:** demo-5xx-ApiGw5xxAlarm
 
 ## What Happened
 
-A CloudWatch 5xx alarm fired shortly after a new Lambda deployment was promoted to the `live` alias. Aziron Post-Deployment Validation Agent was automatically invoked to assess service health. HTTP health checks, CloudWatch metric analysis, and integration tests were executed against all API Gateway endpoints. The `/checkout` endpoint returned HTTP 500 responses consistently, while `/health` and `/products` remained healthy. Integration tests confirmed a broken dependency in the checkout handler, resulting in a **NO-GO** verdict.
+A CloudWatch 5xx alarm fired shortly after a new Lambda deployment was promoted to the `live` alias. Post-deployment validation detected elevated HTTP 5xx error rates on the API Gateway endpoints. Health checks against the `/checkout` endpoint returned non-2xx responses, and integration tests confirmed that the checkout flow was broken, triggering an automatic NO-GO verdict and rollback.
 
 ## Root Cause
 
-The `checkout` Lambda handler attempted to call `cart_service.get_cart()`, which was unavailable or incompatible with the newly deployed version. This caused unhandled exceptions in the checkout flow, surfacing as HTTP 500 errors on the `POST /checkout` endpoint and triggering the `demo-5xx-ApiGw5xxAlarm` CloudWatch alarm.
+The `POST /checkout` endpoint began returning `500 Internal Server Error` responses due to a broken integration between the checkout Lambda handler and the `cart_service.get_cart()` dependency. The newly deployed version introduced a call signature mismatch — `get_cart()` was invoked without the required `user_id` parameter, causing an unhandled exception on every checkout request.
 
 ## Auto-Remediation
 
