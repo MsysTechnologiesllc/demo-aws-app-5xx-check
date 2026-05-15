@@ -1,15 +1,15 @@
 # Incident Report — Auto-Rollback Executed
 
-**Date:** 2026-05-15T09:05:30.710Z
+**Date:** 2026-05-15T09:55:32.881Z
 **Alarm:** demo-5xx-ApiGw5xxAlarm
 
 ## What Happened
 
-A CloudWatch 5xx alarm fired shortly after a new Lambda deployment was promoted to the `live` alias. Post-deployment validation detected elevated HTTP 5xx error rates on the API Gateway endpoints. Health checks against the `/checkout` endpoint returned non-2xx responses, and integration tests confirmed that the checkout flow was broken, producing 500 Internal Server Error responses.
+A CloudWatch 5xx alarm fired shortly after a new Lambda deployment was promoted to the `live` alias. Post-deployment validation detected elevated HTTP 5xx error rates on the API Gateway endpoints. Health checks against the `/checkout` endpoint returned non-2xx responses, and integration tests confirmed that the checkout flow was broken, triggering an automatic NO-GO verdict and rollback.
 
 ## Root Cause
 
-The deployed Lambda version contained a broken integration with `cart_service.get_cart()` inside the checkout handler. The function call failed at runtime due to an incompatible interface change, causing unhandled exceptions that propagated as 500 errors to API Gateway consumers.
+The `checkout` Lambda handler failed to correctly integrate with `cart_service.get_cart()`. The newly deployed version introduced a breaking change in the cart service call — likely a mismatched function signature or missing dependency — causing unhandled exceptions and 500 Internal Server Error responses on all requests routed through the checkout endpoint.
 
 ## Auto-Remediation
 
