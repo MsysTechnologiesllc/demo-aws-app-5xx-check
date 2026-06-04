@@ -1,15 +1,15 @@
 # Incident Report — Auto-Rollback Executed
 
-**Date:** 2026-06-04T09:43:25.246Z
+**Date:** 2026-06-04T09:57:25.057Z
 **Alarm:** demo-5xx-ApiGw5xxAlarm
 
 ## What Happened
 
-A deployment was pushed to the Lambda function and promoted to the `live` alias. Shortly after promotion, the CloudWatch alarm `demo-5xx-ApiGw5xxAlarm` fired, indicating a spike in HTTP 5xx errors on the API Gateway. The Aziron Post-Deployment Validation Agent was triggered and performed health checks, CloudWatch metric analysis, and integration tests. The results confirmed that the `/checkout` endpoint was returning 500 Internal Server Error responses, while `/health` and `/products` remained healthy.
+A deployment was pushed that triggered the CloudWatch alarm `demo-5xx-ApiGw5xxAlarm`. Post-deployment validation detected elevated 5xx error rates on the API Gateway. Health checks against the `/checkout` endpoint returned non-2xx responses, and integration tests confirmed the endpoint was broken. The Aziron Post-Deployment Validation Agent automatically initiated a rollback of the Lambda alias `live` to the last known stable version.
 
 ## Root Cause
 
-The newly deployed Lambda version introduced a broken integration with `cart_service.get_cart()` inside the checkout handler. The function call failed at runtime due to an incompatible interface change in the cart service, causing unhandled exceptions and 500 responses on all `POST /checkout` requests.
+The deployed Lambda version introduced a regression in the `/checkout` endpoint. The `cart_service.get_cart()` integration within the checkout handler failed at runtime, causing unhandled exceptions that propagated as HTTP 500 responses through API Gateway. The failure was isolated to the checkout flow and did not affect other endpoints (`/health`, `/products`).
 
 ## Auto-Remediation
 
