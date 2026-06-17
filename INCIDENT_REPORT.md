@@ -1,6 +1,6 @@
 # Incident Report — Auto-Rollback Executed
 
-**Date:** 2026-06-15T18:02:22.369Z
+**Date:** 2026-06-17T12:36:46.420Z
 **Alarm:** demo-5xx-ApiGw5xxAlarm
 
 ## What Happened
@@ -9,7 +9,7 @@ A CloudWatch 5xx alarm fired shortly after a new Lambda deployment was promoted 
 
 ## Root Cause
 
-The root cause was identified as a broken integration between the checkout Lambda handler and the `cart_service.get_cart()` function. The newly deployed version introduced a regression in the cart retrieval logic, causing unhandled exceptions in the checkout handler and resulting in 500 Internal Server Error responses on the `POST /checkout` endpoint.
+The `checkout` Lambda handler failed to correctly integrate with `cart_service.get_cart()`. The newly deployed version introduced a breaking change in the cart service call — likely a mismatched function signature or missing dependency — causing unhandled exceptions and 500 Internal Server Error responses on all requests routed through the checkout endpoint.
 
 ## Auto-Remediation
 
